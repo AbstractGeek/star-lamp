@@ -69,6 +69,13 @@ def visible_bright_stars(stars, keys, obstime, obspos,
     altitude = list(c_azalt.alt.deg)
     mag = [stars[k][2] for k in new_keys]
     rad = [(magnitude + 1 - m) * radius / magnitude for m in mag]
+
+    # Save csvs
+    with open(abspath("./Processed-Data/bright-stars-raw-data.csv"),
+              "w") as csvfile:
+        for i, az in enumerate(azimuth):
+            csvfile.write("%6d,%17.12f,%17.12f,%17.12f,%17.12f\n" %
+                          (new_keys[i], az, altitude[i], mag[i], rad[i]))
     # Obtain only the visible hemisphere
     bright_stars = [(new_keys[i], azimuth[i], alt, mag[i], rad[i])
                     for i, alt in enumerate(altitude)
@@ -76,7 +83,7 @@ def visible_bright_stars(stars, keys, obstime, obspos,
     # Save csvs
     with open(abspath("./Processed-Data/bright-stars.csv"), "w") as csvfile:
         for star in bright_stars:
-            csvfile.write("%6d %17.12f %17.12f %17.12f %17.12f\n" % star)
+            csvfile.write("%6d,%17.12f,%17.12f,%17.12f,%17.12f\n" % star)
     # Return brigh stars
     return bright_stars
 
@@ -99,11 +106,11 @@ def make_lamp_scad(filename, bright_stars, radius, thickness):
         # print(az_alt)
         c = solid.difference()(
             c,
-            solid.rotate([az, alt, 0])(
+            solid.rotate(a=[0, 90 - alt, az])(
                 solid.cylinder(rad, h=radius))
         )
     # Render to file
-    solid.scad_render_to_file(c, 'sky-lamp.scad',
+    solid.scad_render_to_file(c, 'star-lamp.scad',
                               file_header='$fn = %s;' % SEGMENTS)
 
 
@@ -124,21 +131,23 @@ def main():
                               "Default location is Bangalore, India"))
     # Optional arguments
     parser.add_argument(
-        "-m", "--magnitude", default=4.5, help="Minimum brightness magnitude")
+        "-m", "--magnitude", default=5.0, type=float,
+        help="Minimum brightness magnitude")
     parser.add_argument(
-        "-s", "--size", default=100,
+        "-s", "--size", default=100.0, type=float,
         help="Size(radius) of the night sky globe")
     parser.add_argument(
-        "-r", "--radius-ratio", default=0.05,
+        "-r", "--radius-ratio", default=0.02, type=float,
         help="Radius ratio of the size of the globe and the star size")
     parser.add_argument(
-        "-c", "--altitude-cutoff", default=0,
+        "-c", "--altitude-cutoff", default=0, type=float,
         help="Altitude cutoff (max visibility angle > 0 default)")
     parser.add_argument(
-        "-d", "--thickness", default=0,
+        "-d", "--thickness-ratio", default=0.05, type=float,
         help="Thickness of the globe/sphere")
 
     args = parser.parse_args()
+    print(args)
     obspos = args.location.split(":")
     # Obtain earthlocation and time
     pos = EarthLocation(lat=float(obspos[0]), lon=float(obspos[1]),
@@ -156,7 +165,7 @@ def main():
 
     # Make the scad
     make_lamp_scad(abspath('./sky-lamp.scad'),
-                   bright_stars, args.size, args.thickness)
+                   bright_stars, args.size, args.thickness_ratio * args.size)
 
     # Done!
 

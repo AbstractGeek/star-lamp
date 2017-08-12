@@ -108,3 +108,6 @@ pip-selfcheck.json
 lib64
 pyvenv.cfg
 share/
+
+# Ignore folder
+stash/
