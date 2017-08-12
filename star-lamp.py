@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import argparse
 from astropy.time import Time
 from astropy.coordinates import EarthLocation
 from astropy.coordinates import SkyCoord
@@ -6,9 +7,12 @@ from astropy.coordinates import AltAz
 from datetime import datetime
 from astropy import units as u
 from os.path import abspath
-from math import pow as power
-from solid import *
-from solid.utils import *  # Not required, but the utils module is useful
+import csv
+import solid
+import solid.utils as sutil
+
+# CONSTANTS
+SEGMENTS = 50
 
 
 def process_ybsc(filename):
@@ -47,55 +51,115 @@ def process_ybsc(filename):
     return stars, keys
 
 
-def get_bright_stars(stars, keys, magnitude=4.5, radius=5.0):
-    """Obtain star radius based on magnitude."""
-    new_keys = [k for k in keys if stars[k][2] < magnitude]
-    # star_brightness = [power(2.512, -1 * stars[k][2]) for k in new_keys]
-    # star_radius = [s_b * radius for s_b in star_brightness]
-    bright_stars = [(k, stars[k][0], stars[k][1],
-                     (5 - stars[k][2]) / 2) for k in new_keys]
+def visible_bright_stars(stars, keys, obstime, obspos,
+                         altitude_cutoff, magnitude, radius):
+    """Obtain star radius based on magnitude.
 
+    This function extracts azimuth and elevation of visible bright stars
+    at the time and the place given.
+    """
+    # Find bright stars
+    new_keys = [k for k in keys if stars[k][2] < magnitude]
+    # Convert to altitude and azimuth
+    c_icrs = SkyCoord(ra=[stars[k][0] for k in new_keys] * u.degree,
+                      dec=[stars[k][1] for k in new_keys] * u.degree,
+                      frame='icrs')
+    c_azalt = c_icrs.transform_to(AltAz(obstime=obstime, location=obspos))
+    azimuth = list(c_azalt.az.deg)
+    altitude = list(c_azalt.alt.deg)
+    mag = [stars[k][2] for k in new_keys]
+    rad = [(magnitude + 1 - m) * radius / magnitude for m in mag]
+    # Obtain only the visible hemisphere
+    bright_stars = [(new_keys[i], azimuth[i], alt, mag[i], rad[i])
+                    for i, alt in enumerate(altitude)
+                    if alt > altitude_cutoff]
+    # Save csvs
+    with open(abspath("./Processed-Data/bright-stars.csv"), "w") as csvfile:
+        for star in bright_stars:
+            csvfile.write("%6d %17.12f %17.12f %17.12f %17.12f\n" % star)
+    # Return brigh stars
     return bright_stars
 
 
-# Process yale bright star catalog
-stars, keys = process_ybsc(abspath('./Raw-Data/bsc5.dat'))
-bright_stars = get_bright_stars(stars, keys)
-
-# import argparse
-pos = EarthLocation(lat=12.97, lon=77.59, height=926)
-t = Time(datetime.utcnow(), scale='utc', location=pos)
-c = SkyCoord(ra=10.625 * u.degree, dec=41.2 * u.degree, frame='icrs')
-c_all = SkyCoord(ra=[ra for _, ra, _, _ in bright_stars] * u.degree,
-                 dec=[dec for _, _, dec, _ in bright_stars] * u.degree,
-                 frame='icrs')
-c_azalt = c_all.transform_to(AltAz(obstime=t, location=pos))
-
-# print(c_azalt)
-
-# Convert to scad
-SEGMENTS = 50
-r = 50
-c = difference()(
-    sphere(r=r),
-    sphere(r=r - 10)
-)
-
-for i, az_alt in enumerate(c_azalt):
-    # print(az_alt)
-    c = difference()(
+def make_lamp_scad(filename, bright_stars, radius, thickness):
+    # Make a hollow sphere
+    c = solid.difference()(
+        solid.sphere(r=radius),
+        solid.sphere(r=radius - thickness)
+    )
+    # Cut of a part of it
+    c = solid.difference()(
         c,
-        rotate([az_alt.az.deg, az_alt.alt.deg, 0])(
-            cylinder(bright_stars[i][3], h=r))
+        sutil.down(radius)(
+            solid.cube(2 * radius, center=True)
+        )
     )
+    # Add stars
+    for _, az, alt, _, rad in bright_stars:
+        # print(az_alt)
+        c = solid.difference()(
+            c,
+            solid.rotate([az, alt, 0])(
+                solid.cylinder(rad, h=radius))
+        )
+    # Render to file
+    solid.scad_render_to_file(c, 'sky-lamp.scad',
+                              file_header='$fn = %s;' % SEGMENTS)
 
-# Cut off bottom Part
-c = difference()(
-    c,
-    down(50)(
-        cube(50, 200)
-    )
-)
 
-scad_render_to_file(c, 'sky-lamp.scad',
-                    file_header='$fn = %s;' % SEGMENTS)
+def main():
+    # parse input
+    parser = argparse.ArgumentParser(
+        description=(
+            'Creates a scad file with a night sky globe with time'
+            ' and positional arguments provided.'))
+    # Main arguments
+    parser.add_argument("-t", "--time",
+                        default=datetime.utcnow(),
+                        help="Time in observer location")
+    parser.add_argument("-l", "--location",
+                        default="12.97:77.59:926",
+                        help=("Location of the observer location"
+                              "(lat: lon or lat: lon: height)."
+                              "Default location is Bangalore, India"))
+    # Optional arguments
+    parser.add_argument(
+        "-m", "--magnitude", default=4.5, help="Minimum brightness magnitude")
+    parser.add_argument(
+        "-s", "--size", default=100,
+        help="Size(radius) of the night sky globe")
+    parser.add_argument(
+        "-r", "--radius-ratio", default=0.05,
+        help="Radius ratio of the size of the globe and the star size")
+    parser.add_argument(
+        "-c", "--altitude-cutoff", default=0,
+        help="Altitude cutoff (max visibility angle > 0 default)")
+    parser.add_argument(
+        "-d", "--thickness", default=0,
+        help="Thickness of the globe/sphere")
+
+    args = parser.parse_args()
+    obspos = args.location.split(":")
+    # Obtain earthlocation and time
+    pos = EarthLocation(lat=float(obspos[0]), lon=float(obspos[1]),
+                        height=float(0 if len(obspos) == 2 else obspos[2]))
+    t = Time(args.time, scale='utc', location=pos)
+    # print double check stuff
+    # print(pos)
+    # print(t)
+
+    # Process yale bright star catalog
+    stars, keys = process_ybsc(abspath('./Raw-Data/bsc5.dat'))
+    bright_stars = visible_bright_stars(
+        stars, keys, t, pos, args.altitude_cutoff, args.magnitude,
+        args.size * args.radius_ratio)
+
+    # Make the scad
+    make_lamp_scad(abspath('./sky-lamp.scad'),
+                   bright_stars, args.size, args.thickness)
+
+    # Done!
+
+
+if __name__ == '__main__':
+    main()
