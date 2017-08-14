@@ -111,3 +111,9 @@ share/
 
 # Ignore folder
 stash/
+Processed-Data/
+*.ipynb
+*.stl
+*.scad
+*.gcode
+*.data
