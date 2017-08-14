@@ -8,11 +8,24 @@ from datetime import datetime
 from astropy import units as u
 from os.path import abspath
 from re import search as re_search
+from collections import defaultdict
+from pprint import pprint
+import numpy as np
 import solid
 import solid.utils as sutil
 
 # CONSTANTS
 SEGMENTS = 50
+
+
+def sph2cart(radius, azimuth, elevation):
+    """Convert spherical coordinates to cartesian coordinates."""
+    x = radius * np.cos(elevation * np.pi / 180) * \
+        np.cos(azimuth * np.pi / 180)
+    y = radius * np.cos(elevation * np.pi / 180) * \
+        np.sin(azimuth * np.pi / 180)
+    z = radius * np.sin(elevation * np.pi / 180)
+    return x, y, z
 
 
 def process_ybsc(filename):
@@ -113,30 +126,111 @@ def constellation_stick_figures(filename, obstime, obspos, altitude_cutoff):
             csvfile.write("%s,%17.12f,%17.12f,%17.12f,%17.12f\n" %
                           (cname, const_location[i][0], const_location[i][1],
                            const_location[i][2], const_location[i][3]))
+    # Transform coordinates to azimuth and altitude
+    c_start_icrs = SkyCoord(
+        ra=[const[0] for const in const_location] * u.degree,
+        dec=[const[1] for const in const_location] * u.degree,
+        frame='icrs')
+    c_start_azalt = c_start_icrs.transform_to(
+        AltAz(obstime=obstime, location=obspos))
+    c_stop_icrs = SkyCoord(
+        ra=[const[2] for const in const_location] * u.degree,
+        dec=[const[3] for const in const_location] * u.degree,
+        frame='icrs')
+    c_stop_azalt = c_stop_icrs.transform_to(
+        AltAz(obstime=obstime, location=obspos))
+    # Extract transformed coordinates
+    az1 = list(c_start_azalt.az.deg)
+    alt1 = list(c_start_azalt.alt.deg)
+    az2 = list(c_stop_azalt.az.deg)
+    alt2 = list(c_stop_azalt.alt.deg)
+    stick_figures_all = defaultdict(list)
+    # Save transformed coordinates as a defaultdict
+    for i, cname in enumerate(const_name):
+        stick_figures_all[cname].append((az1[i], alt1[i], az2[i], alt2[i]))
+    # Backup data as a csv
+    with open(abspath("./Processed-Data/constellations-all.csv"),
+              "w") as csvfile:
+        for cname in sorted(stick_figures_all.keys()):
+            for a1, e1, a2, e2 in stick_figures_all[cname]:
+                csvfile.write("%s,%17.12f,%17.12f,%17.12f,%17.12f\n" %
+                              (cname, a1, e1, a2, e2))
+    # Obtain only the visible hemisphere
+    stick_figures = {}
+    for cname in sorted(stick_figures_all.keys()):
+        save_flag = True
+        for a1, e1, a2, e2 in stick_figures_all[cname]:
+            if (e1 >= altitude_cutoff) and (e2 >= altitude_cutoff):
+                save_flag = (True and save_flag)
+            else:
+                save_flag = False
+                break
+        # Check save flag and append to dictionary
+        if save_flag:
+            stick_figures[cname] = stick_figures_all[cname]
+    # Save filtered coordinates as csv
+    with open(abspath("./Processed-Data/constellations-visible.csv"),
+              "w") as csvfile:
+        for cname in sorted(stick_figures.keys()):
+            for a1, e1, a2, e2 in stick_figures[cname]:
+                csvfile.write("%s,%17.12f,%17.12f,%17.12f,%17.12f\n" %
+                              (cname, a1, e1, a2, e2))
     # Return stick_figures data
-    stick_figures = []
     return stick_figures
 
 
-def make_lamp_scad(filename, bright_stars, radius, thickness):
+def make_sticks(a1, e1, a2, e2, r, b):
+    x1, y1, z1 = sph2cart(r, a1, e1)
+    x2, y2, z2 = sph2cart(r, a2, e2)
+    # Obtain slope (2D)
+    m = -(x2 - x1) / (y2 - y1)
+    # Obtain intercept of the perpendicular line
+    c1 = y1 - m * x1
+    c2 = y2 - m * x2
+    # Obtain first point set
+    x11 = x1 - np.sqrt(np.square(b) / (np.square(m) + 1))
+    x12 = x1 + np.sqrt(np.square(b) / (np.square(m) + 1))
+    y11 = m * x11 + c1
+    y12 = m * x12 + c1
+    # Obtain second point set
+    x21 = x2 - np.sqrt(np.square(b) / (np.square(m) + 1))
+    x22 = x2 + np.sqrt(np.square(b) / (np.square(m) + 1))
+    y21 = m * x21 + c2
+    y22 = m * x22 + c2
+    # Create sticks tuple and return
+    sticks = ((x11, y11), (x12, y12), (x22, y22), (x21, y21))
+    return sticks
+
+
+def make_stick_figures(stick_figures, radius, breadth):
+    sticks = []
+    for cname in sorted(stick_figures.keys()):
+        for a1, e1, a2, e2 in stick_figures[cname]:
+            sticks.append(make_sticks(a1, e1, a2, e2, radius, breadth))
+    pass
+
+
+def make_lamp_scad(filename, bright_stars, stick_figures, radius, thickness):
     """Use bright stars and input arguements to create the scad lamp."""
-    c = solid.difference()(
+    shell = solid.difference()(
         solid.sphere(r=radius),
-        solid.sphere(r=radius - thickness)
+        solid.sphere(r=radius - thickness / 2)
     )
     # Cut of a part of it
-    c = solid.difference()(
-        c,
+    shell = solid.difference()(
+        shell,
         sutil.down(radius)(
             solid.cube(2 * radius, center=True)
         )
     )
+    # Add stick figures
+
     # Add stars
     for _, az, alt, _, rad in bright_stars:
         # print(az_alt)
         c = solid.difference()(
             c,
-            solid.rotate(a=[0, 90 - alt, az])(
+            solid.rotate(a=[0, -1 * (90 - alt), az])(
                 solid.cylinder(rad, h=radius))
         )
     # Render to file
@@ -202,7 +296,8 @@ def main():
 
     # Make the scad
     make_lamp_scad(abspath('./' + args.output_file),
-                   bright_stars, args.size, args.thickness_ratio * args.size)
+                   bright_stars, stick_figures, args.size,
+                   args.thickness_ratio * args.size)
 
     # Done!
 
