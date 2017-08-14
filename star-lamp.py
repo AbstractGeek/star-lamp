@@ -202,37 +202,52 @@ def make_sticks(a1, e1, a2, e2, r, b):
     return sticks
 
 
-def make_stick_figures(stick_figures, radius, breadth):
-    sticks = []
+def make_stick_figures(shell, stick_figures, radius, breadth):
+    """Adds stick figure inscription onto the shell."""
+    # Create inscribed shell
+    i_shell = solid.difference()
+    i_shell.add(shell)
+    # Add individual polygons to the inscribed shell
     for cname in sorted(stick_figures.keys()):
         for a1, e1, a2, e2 in stick_figures[cname]:
-            sticks.append(make_sticks(a1, e1, a2, e2, radius, breadth))
-    pass
+            i_shell.add(solid.linear_extrude(height=radius)(
+                        solid.polygon(
+                            make_sticks(a1, e1, a2, e2, radius, breadth))))
+    return i_shell
 
 
 def make_lamp_scad(filename, bright_stars, stick_figures, radius, thickness):
     """Use bright stars and input arguements to create the scad lamp."""
+    # Create a main shell to be inscribed on
     shell = solid.difference()(
         solid.sphere(r=radius),
-        solid.sphere(r=radius - thickness / 2)
-    )
-    # Cut of a part of it
-    shell = solid.difference()(
-        shell,
+        solid.sphere(r=radius - thickness / 2),
         sutil.down(radius)(
             solid.cube(2 * radius, center=True)
         )
     )
     # Add stick figures
+    i_shell = make_stick_figures(shell, stick_figures, radius, 0.5)
+    # i_shell = shell
+    # Add another layer of shell (without inscription)
+    c_shell = solid.union()(
+        i_shell,
+        solid.difference()(
+            solid.sphere(r=radius - thickness / 2),
+            solid.sphere(r=radius - thickness),
+            sutil.down(radius)(
+                solid.cube(2 * radius, center=True)
+            )
+        )
+    )
 
     # Add stars
+    c = solid.difference()
+    c.add(c_shell)
     for _, az, alt, _, rad in bright_stars:
-        # print(az_alt)
-        c = solid.difference()(
-            c,
-            solid.rotate(a=[0, -1 * (90 - alt), az])(
-                solid.cylinder(rad, h=radius))
-        )
+        c.add(solid.rotate(a=[0, -1 * (90 - alt), az])(
+            solid.cylinder(rad, h=radius)))
+
     # Render to file
     solid.scad_render_to_file(c, filename,
                               file_header='$fn = %s;' % SEGMENTS)
