@@ -7,7 +7,7 @@ from astropy.coordinates import AltAz
 from datetime import datetime
 from astropy import units as u
 from os.path import abspath
-import csv
+from re import search as re_search
 import solid
 import solid.utils as sutil
 
@@ -88,8 +88,38 @@ def visible_bright_stars(stars, keys, obstime, obspos,
     return bright_stars
 
 
+def constellation_stick_figures(filename, obstime, obspos, altitude_cutoff):
+    """Obtain local coordinates for constellation stick figures."""
+    const_name = []
+    const_location = []
+    for line in open(filename):
+        if (line[0] == "#") or (len(line) < 10):
+            continue
+        try:
+            cname, ra1, dec1, ra2, dec2 = re_search(
+                "^\s*(\w+)\s+([-]?\d+\.\d+)\s+([-]?\d+\.\d+)\s+"
+                "([-]?\d+\.\d+)\s+([-]?\d+\.\d+)\s*$",
+                line).groups()
+
+            const_name.append(cname)
+            const_location.append((float(ra1), float(dec1),
+                                   float(ra2),  float(dec2)))
+        except ValueError:
+            continue
+    # Save extracted csvs
+    with open(abspath("./Processed-Data/constellations-raw-data.csv"),
+              "w") as csvfile:
+        for i, cname in enumerate(const_name):
+            csvfile.write("%s,%17.12f,%17.12f,%17.12f,%17.12f\n" %
+                          (cname, const_location[i][0], const_location[i][1],
+                           const_location[i][2], const_location[i][3]))
+    # Return stick_figures data
+    stick_figures = []
+    return stick_figures
+
+
 def make_lamp_scad(filename, bright_stars, radius, thickness):
-    # Make a hollow sphere
+    """Use bright stars and input arguements to create the scad lamp."""
     c = solid.difference()(
         solid.sphere(r=radius),
         solid.sphere(r=radius - thickness)
@@ -110,12 +140,12 @@ def make_lamp_scad(filename, bright_stars, radius, thickness):
                 solid.cylinder(rad, h=radius))
         )
     # Render to file
-    solid.scad_render_to_file(c, 'star-lamp.scad',
+    solid.scad_render_to_file(c, filename,
                               file_header='$fn = %s;' % SEGMENTS)
 
 
 def main():
-    # parse input
+    """Obtain command line arguments and create the star lamp."""
     parser = argparse.ArgumentParser(
         description=(
             'Creates a scad file with a night sky globe with time'
@@ -145,9 +175,12 @@ def main():
     parser.add_argument(
         "-d", "--thickness-ratio", default=0.05, type=float,
         help="Thickness of the globe/sphere")
+    parser.add_argument(
+        "-o", "--output-file", default="star-lamp.scad", type=str,
+        help="Output filename (default: star-lamp.scad)")
 
     args = parser.parse_args()
-    print(args)
+    # print(args)       # To debug
     obspos = args.location.split(":")
     # Obtain earthlocation and time
     pos = EarthLocation(lat=float(obspos[0]), lon=float(obspos[1]),
@@ -162,9 +195,13 @@ def main():
     bright_stars = visible_bright_stars(
         stars, keys, t, pos, args.altitude_cutoff, args.magnitude,
         args.size * args.radius_ratio)
+    # Obtain constellation stick figures
+    stick_figures = constellation_stick_figures(
+        abspath('./Raw-Data/ConstellationStickFigures.dat'),
+        t, pos, args.altitude_cutoff)
 
     # Make the scad
-    make_lamp_scad(abspath('./sky-lamp.scad'),
+    make_lamp_scad(abspath('./' + args.output_file),
                    bright_stars, args.size, args.thickness_ratio * args.size)
 
     # Done!
