@@ -282,7 +282,7 @@ def main():
         "-c", "--altitude-cutoff", default=0, type=float,
         help="Altitude cutoff (max visibility angle > 0 default)")
     parser.add_argument(
-        "-d", "--thickness-ratio", default=0.05, type=float,
+        "-d", "--thickness-ratio", default=0.1, type=float,
         help="Thickness of the globe/sphere")
     parser.add_argument(
         "-o", "--output-file", default="star-lamp.scad", type=str,
