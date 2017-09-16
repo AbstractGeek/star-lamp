@@ -230,26 +230,35 @@ def make_lamp_scad(filename, bright_stars, stick_figures, radius, thickness):
     i_shell = make_stick_figures(shell, stick_figures, radius, 0.5)
     # i_shell = shell
     # Add another layer of shell (without inscription)
-    c_shell = solid.union()(
-        i_shell,
-        solid.difference()(
-            solid.sphere(r=radius - thickness / 2),
-            solid.sphere(r=radius - thickness),
-            sutil.down(radius)(
-                solid.cube(2 * radius, center=True)
-            )
+    c_shell = solid.difference()(
+        solid.sphere(r=radius - thickness / 2),
+        solid.sphere(r=radius - thickness),
+        sutil.down(radius)(
+            solid.cube(2 * radius, center=True)
         )
     )
 
-    # Add stars
-    c = solid.difference()
-    c.add(c_shell)
+    # Add stars to both the i_shell and c_shell
+    i_stars = solid.difference()
+    i_stars.add(i_shell)
     for _, az, alt, _, rad in bright_stars:
-        c.add(solid.rotate(a=[0, -1 * (90 - alt), az])(
+        i_stars.add(solid.rotate(a=[0, -1 * (90 - alt), az])(
             solid.cylinder(rad, h=radius)))
 
+    c_stars = solid.difference()
+    c_stars.add(c_shell)
+    for _, az, alt, _, rad in bright_stars:
+        c_stars.add(solid.rotate(a=[0, -1 * (90 - alt), az])(
+            solid.cylinder(rad, h=radius)))
+
+    complete = solid.union()(i_stars, c_stars)
+
     # Render to file
-    solid.scad_render_to_file(c, filename,
+    solid.scad_render_to_file(i_stars, filename + '-inscription' + '.scad',
+                              file_header='$fn = %s;' % SEGMENTS)
+    solid.scad_render_to_file(c_stars, filename + '-stars' + '.scad',
+                              file_header='$fn = %s;' % SEGMENTS)
+    solid.scad_render_to_file(complete, filename + '-complete' + '.scad',
                               file_header='$fn = %s;' % SEGMENTS)
 
 
@@ -285,8 +294,8 @@ def main():
         "-d", "--thickness-ratio", default=0.1, type=float,
         help="Thickness of the globe/sphere")
     parser.add_argument(
-        "-o", "--output-file", default="star-lamp.scad", type=str,
-        help="Output filename (default: star-lamp.scad)")
+        "-o", "--output-file", default="star-lamp", type=str,
+        help="Output filename (default: star-lamp)")
 
     args = parser.parse_args()
     # print(args)       # To debug
