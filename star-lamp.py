@@ -282,7 +282,7 @@ def main():
         "-m", "--magnitude", default=5.0, type=float,
         help="Minimum brightness magnitude")
     parser.add_argument(
-        "-s", "--size", default=100.0, type=float,
+        "-s", "--size", default=50.0, type=float,
         help="Size(radius) of the night sky globe")
     parser.add_argument(
         "-r", "--radius-ratio", default=0.02, type=float,
@@ -291,7 +291,7 @@ def main():
         "-c", "--altitude-cutoff", default=0, type=float,
         help="Altitude cutoff (max visibility angle > 0 default)")
     parser.add_argument(
-        "-d", "--thickness-ratio", default=0.1, type=float,
+        "-d", "--thickness-ratio", default=0.05, type=float,
         help="Thickness of the globe/sphere")
     parser.add_argument(
         "-o", "--output-file", default="star-lamp", type=str,
